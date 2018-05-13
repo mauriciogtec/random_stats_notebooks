@@ -1,0 +1,116 @@
+---
+title: "Permutation tests"
+output: html_notebook
+---
+
+In this notebook I want to explain the basic ideas behind permutation tests. It is a non-parameteric way of testing statistical hypothesis that is based upon ideas of resampling to generate null-hypothesis distributions--as opposed to relying on a known-distribution under certain assumptions.
+
+We'll use the following libraries in this notebook.
+
+```{r}
+library(ggplot2)
+library(tidyverse)
+```
+
+Let's compare two scenarios:
+
+* *Scenario 1*: $x$ and $y$ are vectors same mean: $E x = Ey = 0$. To make it more interesting, they will have different variances $Vx = 0.5$ and $1$.
+* *Scenario 2*: $x$ and $y$ are vectors with different mean: $E x = 0.7$ and $Ey = 0$. The variances are the same as before.
+
+We'll see if a permutation test can find the difference in scenario 2 without any distributional assumptions! Our sample size will be 50 for each variable.
+
+```{r}
+set.seed(999)
+scenario1 <- data_frame(
+  scenario = "Scenario 1",
+  x = rnorm(50, mean = 0, sd = 0.5),
+  y = rnorm(50, mean = 0, sd = 1))
+scenario2 <- data_frame(
+  scenario = "Scenario 2",
+  x = rnorm(50, mean = 0.7, sd = 0.5),
+  y = rnorm(50, mean = 0, sd = 1)
+)
+```
+
+We will be interested in obtaining the difference of the means
+
+```{r}
+experiment_data <- bind_rows(scenario1, scenario2) %>% 
+  mutate(difference = x - y)
+```
+
+```{r}
+ggdata <- experiment_data %>% 
+  select(scenario, x, y) %>% 
+  gather(variable, value, -scenario)
+
+ggplot(ggdata) +
+  aes(x = value, fill = variable) +
+  geom_histogram(bins = 10, alpha = 0.3) +
+  facet_grid(~ scenario) +
+  labs(title = "Experiment data",
+       subtitle = "In scenario 2 the mean of x is shifted right")
+```
+
+The mean of the difference in each scenario is 
+
+```{r}
+diff_data <- experiment_data %>% 
+  group_by(scenario) %>% 
+  summarise(mean_diff = mean(difference))
+diff_data
+```
+
+Let's construct a null distribution for the differences where the null is that there is no difference (scenario don't matter). This will require
+
+> Random shuffling the labels between x and y and computing the mean difference at eachtime.
+
+This is done independently for each scenario. In both cases we are obtaining a null distribution under the assumption that the mean of $x$ and $y$ are the same. We then compare the obtained mained differences.
+
+
+```{r}
+num_resamples <- 100
+```
+
+
+```{r}
+perm_diffs <- function(x, y, num_resamples) {
+  diffs <- numeric(50)
+  for (i in 1:num_resamples) {
+    perm <- sample(1:2, 50, replace = TRUE)
+    xnew <- numeric(50)
+    ynew <- numeric(50)
+    for (k in 1:50) {
+      if (perm[k] == 1) {
+         xnew[k] <- x[k]
+         ynew[k] <- y[k]
+      } else {
+         xnew[k] <- y[k]
+         ynew[k] <- x[k]
+      }
+    }
+    diffs[i] <- mean(xnew - ynew)
+  }
+  diffs
+}
+diff_under_null <- data_frame(
+  resample = 1:50,
+  `Scenario 1` = perm_diffs(scenario1$x, scenario2$y, 50),
+  `Scenario 2` = perm_diffs(scenario2$x, scenario2$y, 50))
+head(diff_under_null)
+```
+
+```{r}
+ggdata <- diff_under_null %>% 
+  gather(scenario, difference, -resample)
+
+ggplot(ggdata, aes(x = difference)) +
+  geom_histogram(bins = 10) +
+  facet_grid(~scenario) + 
+  geom_vline(data = diff_data, aes(xintercept = mean_diff)) +
+  labs(title = "Null distributions (no mean difference)",
+       subtitle = "Black line shows the observed mean difference")
+
+```
+
+Bingo! We see that in the first case there is no strong evidence for a difference (because in reality there's not!), but in the second case we strongly reject that the means are the same.
